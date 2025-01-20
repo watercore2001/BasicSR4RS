@@ -33,7 +33,7 @@ def to_y_channel(img):
     """Change to Y channel of YCbCr.
 
     Args:
-        img (ndarray): Images with range [0, 255].
+        img (ndarray): Images with range [0, 255]. must be BGR
 
     Returns:
         (ndarray): Images with range [0, 255] (float type) without round.

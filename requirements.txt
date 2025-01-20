@@ -8,8 +8,10 @@ pyyaml
 requests
 scikit-image
 scipy
-tb-nightly
+#tb-nightly
 torch>=1.7
 torchvision
 tqdm
 yapf
+tacoreader
+rasterio

@@ -1,0 +1,68 @@
+# ----------- Commands for running
+# ----------- Single GPU
+# PYTHONPATH="./:${PYTHONPATH}"  CUDA_VISIBLE_DEVICES=0 python basicsr/test.py -opt options/test/SRResNet_SRGAN/test_MSRResNet_x4.yml
+
+# general settings
+name: train_SRCNN_x4_blabla_SEN2NAIPv2_500k_B16G1_wandb
+model_type: SRRSModel
+scale: 4
+num_gpu: 0
+manual_seed: 0
+
+# test dataset settings
+datasets:
+  test_1:  # the 1st test dataset
+    name: Sen2NAIPv2_cross_sensor_test
+    type: TacoSplitDataset
+    taco_paths: "datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
+    split_percent: [0.9, 0.09, 0.01]
+    phase: "test"
+    scale: 4
+    gt_size: 512
+    use_hflip: true
+    use_rot: true
+
+# network structures
+network_g:
+  type: SRCNN
+  num_in_ch: 4
+  num_out_ch: 4
+  upscale: 4
+
+# path
+path:
+  pretrain_network_g: experiments/debug_train_SRCNN_x4_blabla_SEN2NAIPv2_500k_B16G1_wandb/models/net_g_8.pth
+  param_key_g: params
+  strict_load_g: true
+
+# validation settings
+val:
+  save_img: true
+  suffix: ~  # add suffix to saved images, different with other experiment
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+    ssim:
+      type: calculate_ssim
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+    rgb_niqe:
+      type: calculate_rs_niqe
+      input_bands: [2, 1, 0]
+      crop_border: 4
+      better: lower
+    nir_niqe:
+      type: calculate_rs_niqe
+      input_bands: [3]
+      crop_border: 4
+      better: lower
+    rgb_lpips:
+      type: calculate_rs_lpips
+      input_bands: [2, 1, 0]
+      crop_border: 4
+      better: lower
