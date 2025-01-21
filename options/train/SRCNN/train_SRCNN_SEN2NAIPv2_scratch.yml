@@ -1,8 +1,8 @@
 # general settings
-name: train_SRCNN_x4_blabla_SEN2NAIPv2_500k_B16G1_wandb
-model_type: SRModel
+name: train_SRCNN_x4_SEN2NAIPv2_50k_B20G1F32_wandb
+model_type: SRRSModel
 scale: 4
-num_gpu: 0
+num_gpu: auto
 manual_seed: 0
 
 # dataset and data loader settings
@@ -12,6 +12,7 @@ datasets:
     type: TacoSplitDataset
     taco_paths: "datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
     split_percent: [0.9, 0.09, 0.01]
+    split: 0
     phase: "train"
     scale: 4
     gt_size: 512
@@ -20,15 +21,16 @@ datasets:
 
     # data loader
     num_worker_per_gpu: 6
-    batch_size_per_gpu: 20
+    batch_size_per_gpu: 4
     dataset_enlarge_ratio: 1
     prefetch_mode: ~
 
   val:
-    name: Sen2NAIPv2_cross_sensor_val
+    name: Sen2NAIPv2_cross_sensor_test
     type: TacoSplitDataset
-    taco_paths: "/mnt/code/deep_learning/BasicSR/datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
+    taco_paths: "datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
     split_percent: [0.9, 0.09, 0.01]
+    split: 1
     phase: "val"
     scale: 4
     gt_size: 512
@@ -59,10 +61,10 @@ train:
 
   scheduler:
     type: MultiStepLR
-    milestones: [100000, 200000, 300000, 400000]
+    milestones: [10000, 20000, 30000, 40000]
     gamma: 0.5
 
-  total_iter: 500000
+  total_iter: 50000
   warmup_iter: -1  # no warm up
 
   # losses
@@ -73,7 +75,7 @@ train:
 
 # validation settings
 val:
-  val_freq: !!float 5e3
+  val_freq: 5000
   save_img: true
 
   metrics:
@@ -81,24 +83,20 @@ val:
       type: calculate_psnr
       crop_border: 4
       test_y_channel: false
-      better: higher
+      better: higher  # the higher, the better. Default: higher
     ssim:
       type: calculate_ssim
       crop_border: 4
       test_y_channel: false
       better: higher
-    niqe:
-      type: calculate_niqe
-      crop_border: 4
-      better: lower
 
 # logging settings
 logger:
   print_freq: 100
-  save_checkpoint_freq: !!float 5e3
+  save_checkpoint_freq: 5000
   use_tb_logger: true
   wandb:
-    project: ~
+    project: SEN2NAIPv2CrossSensor
     resume_id: ~
 
 # dist training settings

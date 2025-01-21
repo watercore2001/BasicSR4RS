@@ -82,19 +82,10 @@ class TacoSplitDataset(torch.utils.data.Dataset):
         self.opt = opt
         split_percent = self.opt['split_percent']
         overall_dataset = TacoDataset(opt)
-        train_dataset, val_dataset, test_dataset = data.random_split(overall_dataset,
-                                                                     split_percent,
-                                                                     self.generator)
+        datasets = data.random_split(overall_dataset, split_percent, self.generator)
 
-        phase = opt['phase']
-        if phase == "train":
-            self.dataset = train_dataset
-        elif phase == "val":
-            self.dataset = val_dataset
-        elif phase == "test":
-            self.dataset = test_dataset
-        else:
-            raise ValueError("phase must be 'train' or 'val' or 'test'.")
+        split = opt['split']
+        self.dataset = datasets[split]
 
     def __len__(self):
         return self.dataset.__len__()

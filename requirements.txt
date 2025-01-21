@@ -15,3 +15,7 @@ tqdm
 yapf
 tacoreader
 rasterio
+matplotlib
+lpips
+wandb
+tensorboard

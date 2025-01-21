@@ -6,7 +6,7 @@
 name: train_SRCNN_x4_blabla_SEN2NAIPv2_500k_B16G1_wandb
 model_type: SRRSModel
 scale: 4
-num_gpu: 0
+num_gpu: auto
 manual_seed: 0
 
 # test dataset settings
@@ -16,6 +16,7 @@ datasets:
     type: TacoSplitDataset
     taco_paths: "datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
     split_percent: [0.9, 0.09, 0.01]
+    split: 1
     phase: "test"
     scale: 4
     gt_size: 512
@@ -31,7 +32,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: experiments/debug_train_SRCNN_x4_blabla_SEN2NAIPv2_500k_B16G1_wandb/models/net_g_8.pth
+  pretrain_network_g: experiments/train_SRCNN_x4_SEN2NAIPv2_500k_B20G1F32_wandb/models/net_g_5000.pth
   param_key_g: params
   strict_load_g: true
 
