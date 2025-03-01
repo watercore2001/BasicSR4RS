@@ -3,6 +3,8 @@ from collections import OrderedDict
 from os import path as osp
 from tqdm import tqdm
 
+import torch._dynamo
+
 from basicsr.archs import build_network
 from basicsr.losses import build_loss
 from basicsr.metrics import calculate_metric
@@ -44,6 +46,7 @@ class SRModel(BaseModel):
             # net_g_ema is used only for testing on one GPU and saving
             # There is no need to wrap with DistributedDataParallel
             self.net_g_ema = build_network(self.opt['network_g']).to(self.device)
+
             # load pretrained model
             load_path = self.opt['path'].get('pretrain_network_g', None)
             if load_path is not None:

@@ -94,10 +94,14 @@ class BaseModel():
         net = net.to(self.device)
         if self.opt['dist']:
             find_unused_parameters = self.opt.get('find_unused_parameters', False)
+            ddp_local_rank = int(os.environ['LOCAL_RANK'])
             net = DistributedDataParallel(
-                net, device_ids=[torch.cuda.current_device()], find_unused_parameters=find_unused_parameters)
+                net, device_ids=[ddp_local_rank], find_unused_parameters=find_unused_parameters)
+            # net = DistributedDataParallel(
+            #     net, device_ids=[torch.cuda.current_device()], find_unused_parameters=find_unused_parameters)
         elif self.opt['num_gpu'] > 1:
             net = DataParallel(net)
+
         return net
 
     def get_optimizer(self, optim_type, params, lr, **kwargs):
@@ -314,6 +318,15 @@ class BaseModel():
         self._print_different_keys_loading(net, load_net, strict)
         net.load_state_dict(load_net, strict=strict)
 
+    def get_training_state(self, epoch, current_iter):
+        state = {'epoch': epoch, 'iter': current_iter, 'optimizers': [], 'schedulers': []}
+        for o in self.optimizers:
+            state['optimizers'].append(o.state_dict())
+        for s in self.schedulers:
+            state['schedulers'].append(s.state_dict())
+
+        return state
+
     @master_only
     def save_training_state(self, epoch, current_iter):
         """Save training states during training, which will be used for
@@ -324,11 +337,7 @@ class BaseModel():
             current_iter (int): Current iteration.
         """
         if current_iter != -1:
-            state = {'epoch': epoch, 'iter': current_iter, 'optimizers': [], 'schedulers': []}
-            for o in self.optimizers:
-                state['optimizers'].append(o.state_dict())
-            for s in self.schedulers:
-                state['schedulers'].append(s.state_dict())
+            state = self.get_training_state(epoch, current_iter)
             save_filename = f'{current_iter}.state'
             save_path = os.path.join(self.opt['path']['training_states'], save_filename)
 

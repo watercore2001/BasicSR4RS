@@ -1,5 +1,5 @@
 # general settings
-name: train_SRCNN_x4_SEN2NAIPv2_50k_B20G1F32_wandb
+name: train_SRCNN_x4_S2N_hismatch256_500k_B32G1amp_wandb
 model_type: SRRSModel
 scale: 4
 num_gpu: auto
@@ -8,34 +8,40 @@ manual_seed: 0
 # dataset and data loader settings
 datasets:
   train:
-    name: Sen2NAIPv2_cross_sensor_train
+    name: S2N_hismatch_train
     type: TacoSplitDataset
-    taco_paths: "datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
-    split_percent: [0.9, 0.09, 0.01]
+    taco_paths:
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0000.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0001.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0002.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0003.part.taco"
+    split_percent: [0.999, 0.001]
     split: 0
     phase: "train"
     scale: 4
-    gt_size: 512
+    gt_size: 256
     use_hflip: true
     use_rot: true
 
     # data loader
     num_worker_per_gpu: 6
-    batch_size_per_gpu: 4
+    batch_size_per_gpu: 32
     dataset_enlarge_ratio: 1
     prefetch_mode: ~
 
   val:
-    name: Sen2NAIPv2_cross_sensor_test
+    name: S2N_hismatch_val
     type: TacoSplitDataset
-    taco_paths: "datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
-    split_percent: [0.9, 0.09, 0.01]
+    taco_paths:
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0000.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0001.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0002.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0003.part.taco"
+    split_percent: [0.999, 0.001]
     split: 1
     phase: "val"
     scale: 4
-    gt_size: 512
-    use_hflip: true
-    use_rot: true
+    gt_size: 256
 
 # network structures
 network_g:
@@ -52,6 +58,7 @@ path:
 
 # training settings
 train:
+  use_amp: true
   ema_decay: 0.999
   optim_g:
     type: Adam
@@ -61,10 +68,10 @@ train:
 
   scheduler:
     type: MultiStepLR
-    milestones: [10000, 20000, 30000, 40000]
+    milestones: [250000, 400000, 450000, 475000]
     gamma: 0.5
 
-  total_iter: 50000
+  total_iter: 500000
   warmup_iter: -1  # no warm up
 
   # losses
@@ -93,13 +100,9 @@ val:
 # logging settings
 logger:
   print_freq: 100
-  save_checkpoint_freq: 5000
+  save_checkpoint_freq: 10000
   use_tb_logger: true
   wandb:
-    project: SEN2NAIPv2CrossSensor
+    project: SEN2NAIPv2HisMatch
     resume_id: ~
 
-# dist training settings
-#dist_params:
-#  backend: nccl
-#  port: 29500

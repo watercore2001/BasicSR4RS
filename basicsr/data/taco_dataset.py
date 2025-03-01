@@ -9,6 +9,7 @@ from basicsr.data.transforms import augment, paired_random_crop, paired_central_
 from basicsr.utils import img2tensor
 from basicsr.utils.registry import DATASET_REGISTRY
 
+
 class TacoDataset(data.Dataset):
     """
 
@@ -65,6 +66,8 @@ class TacoDataset(data.Dataset):
         # numpy to tensor, HWC -> CHW.
         # Default Dimension order in DL is BCHW
         # Default Channel order in DL is RGB. So img_gt has been RGB+NIR order
+        img_gt = img_gt.astype(np.float32)
+        img_lq = img_lq.astype(np.float32)
         img_gt, img_lq = img2tensor([img_gt, img_lq], bgr2rgb=False, float32=True)
 
         # normalized

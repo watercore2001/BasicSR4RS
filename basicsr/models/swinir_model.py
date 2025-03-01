@@ -3,6 +3,7 @@ from torch.nn import functional as F
 
 from basicsr.utils.registry import MODEL_REGISTRY
 from .sr_model import SRModel
+from .sr_rs_model import SRRSModel
 
 
 @MODEL_REGISTRY.register()
@@ -31,3 +32,8 @@ class SwinIRModel(SRModel):
 
         _, _, h, w = self.output.size()
         self.output = self.output[:, :, 0:h - mod_pad_h * scale, 0:w - mod_pad_w * scale]
+
+
+@MODEL_REGISTRY.register()
+class SwinIRRSModel(SwinIRModel, SRRSModel):
+    pass

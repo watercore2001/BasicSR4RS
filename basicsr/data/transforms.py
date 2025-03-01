@@ -167,7 +167,7 @@ def augment(imgs, hflip=True, rotation=True, flows=None, return_status=False):
 
     Args:
         imgs (list[ndarray] | ndarray): Images HWC to be augmented. If the input
-            is an ndarray, it will be transformed to a list.
+            is an ndarray, it will be transformed to a list. HWC
         hflip (bool): Horizontal flip. Default: True.
         rotation (bool): Ratotation. Default: True.
         flows (list[ndarray]: Flows to be augmented. If the input is an
