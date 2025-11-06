@@ -1,0 +1,151 @@
+# general settings
+name: train_ResShift_x3_L2S_single288_100k_B32G1amp_wandb
+model_type: ResShiftL2SModel
+scale: 3
+num_gpu: auto
+manual_seed: 0
+
+# network structures
+network_g:
+  type: UNetModelSwin
+  image_size: 72 # 72=288/4
+  in_channels: 6
+  model_channels: 160
+  out_channels: 6
+  attention_resolutions: [ 72, 36, 18, 9 ]
+  dropout: 0
+  channel_mult: [ 1, 2, 2, 4 ]
+  num_res_blocks: [ 2, 2, 2, 2 ]
+  conv_resample: True
+  dims: 2
+  use_fp16: False
+  num_head_channels: 32
+  use_scale_shift_norm: True
+  resblock_updown: False
+  swin_depth: 2
+  swin_embed_dim: 192
+  window_size: 9
+  mlp_ratio: 4
+  cond_lq: True
+  lq_size: 72
+
+# autoencoder
+autoencoder:
+  type: VQModelTorch
+  embed_dim: 3
+  n_embed: 8192
+  ddconfig:
+    double_z: False
+    z_channels: 3
+    resolution: 288
+    in_channels: 3
+    out_ch: 3
+    ch: 128
+    ch_mult: [ 1,2,4 ]
+    num_res_blocks: 2
+    attn_resolutions: [ ]
+    dropout: 0.0
+    padding_mode: zeros
+
+diffusion:
+  sf: 3
+  schedule_name: exponential
+  schedule_kwargs:
+    power: 0.3
+  etas_end: 0.99
+  steps: 15
+  min_noise_level: 0.04
+  kappa: 2.0
+  weighted_mse: False
+  predict_type: xstart
+  timestep_respacing: ~
+  scale_factor: 1.0
+  normalize_input: True
+  latent_flag: True
+
+# path
+path:
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~
+  pretrain_network_ae: "experiments/pretrained_models/autoencoder_vq_f4.pth"
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: L2S_single_train
+    type: L2SSingleSplitDataset
+    root_path: "data/time_series"
+    split_percent: [ 0.999, 0.001 ]
+    split: 0
+    phase: "train"
+    psnr_thresh: 22
+    ssim_thresh: 0.8
+    gt_size: 288
+    use_hflip: True
+    use_rot: True
+
+    # data loader
+    num_worker_per_gpu: 6
+    batch_size_per_gpu: 32
+    dataset_enlarge_ratio: 1
+    prefetch_mode: ~
+
+  val:
+    name: L2S_single_val
+    type: L2SSingleSplitDataset
+    root_path: "data/time_series"
+    split_percent: [ 0.999, 0.001 ]
+    split: 1
+    phase: "val"
+    psnr_thresh: 22
+    ssim_thresh: 0.8
+    gt_size: 288
+    use_hflip: True
+    use_rot: True
+
+
+# training settings
+train:
+  use_amp: true
+  ema_decay: 0.999
+  optim_g:
+    type: Adam
+    lr: !!float 4e-5
+    weight_decay: 0
+    betas: [0.9, 0.99]
+
+  scheduler:
+    type: MultiStepLR
+    milestones: [50000, 80000, 90000, 95000]
+    gamma: 0.5
+
+  total_iter: 100000
+  warmup_iter: 5000
+
+# validation settings
+val:
+  val_freq: 5000
+  save_img: true
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+    ssim:
+      type: calculate_ssim
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+
+# logging settings
+logger:
+  print_freq: 100
+  save_checkpoint_freq: 5000
+  use_tb_logger: true
+  wandb:
+    project: L2S_Single_Nopan
+    resume_id: ~
+

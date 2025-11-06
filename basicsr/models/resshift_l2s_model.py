@@ -15,11 +15,11 @@ from basicsr.archs import build_network
 from basicsr.utils import get_root_logger, minusone_one_tensor_to_ubyte_numpy
 from basicsr.utils.registry import MODEL_REGISTRY
 from basicsr.utils.gaussian_diffusion import create_gaussian_diffusion
-from basicsr.models.srrs_model import SRRSModel
+from basicsr.models.srrs_l2s_model import L2SSingleModel
 
 
 @MODEL_REGISTRY.register()
-class ResShiftModel(SRRSModel):
+class ResShiftL2SModel(L2SSingleModel):
     def __init__(self, opt):
 
         # build net_g (swin unet)
@@ -124,10 +124,14 @@ class ResShiftModel(SRRSModel):
         # random noise for added to gt
         latent_downsamping_factor = 2 ** (len(self.opt["autoencoder"]["ddconfig"]["ch_mult"]) - 1)
         latent_resolution = self.gt.shape[-1] // latent_downsamping_factor
-        if "autoencoder" in self.opt:
-            noise_chn = self.opt["autoencoder"]["embed_dim"]
-        else:
-            noise_chn = self.gt.shape[1]
+
+        # if "autoencoder" in self.opt:
+        #     noise_chn = self.opt["autoencoder"]["embed_dim"]
+        # else:
+        #     noise_chn = self.gt.shape[1]
+
+        noise_chn = self.gt.shape[1]
+
         noise = torch.randn(
             size=(batch_size, noise_chn,) + (latent_resolution,) * 2,
             device=self.device,
@@ -254,6 +258,7 @@ class ResShiftModel(SRRSModel):
             pbar = tqdm(total=len(dataloader), unit='image')
 
         for idx, val_data in enumerate(dataloader):
+            img_name = val_data['img_name'][0]
 
             # compute
             self.feed_data(val_data)
@@ -264,10 +269,10 @@ class ResShiftModel(SRRSModel):
             lq_img = minusone_one_tensor_to_ubyte_numpy(visuals['lq'])      # numpy H(BW)(RGBNIR) uint8
             sr_all = minusone_one_tensor_to_ubyte_numpy(visuals['sr_all'])  # numpy H(BW)(RGBNIR) uint8
             sr_img = minusone_one_tensor_to_ubyte_numpy(visuals['result'])  # numpy H(BW)(RGBNIR) uint8
-            metric_data['img'] = sr_img
+            metric_data['img'] = sr_img[..., :3]
             if 'gt' in visuals:
                 gt_img = minusone_one_tensor_to_ubyte_numpy(visuals['gt'])
-                metric_data['img2'] = gt_img
+                metric_data['img2'] = gt_img[..., :3]
                 del self.gt
             else:
                 gt_img = None
@@ -278,14 +283,6 @@ class ResShiftModel(SRRSModel):
             torch.cuda.empty_cache()
 
             # start log
-            lq_path = val_data['lq_path'][0]
-            if lq_path.endswith('.taco'):
-                img_name = osp.basename(lq_path.split(',')[0])
-            else:
-                img_name = osp.splitext(lq_path)[0]
-
-            band_idx = val_data['band_idx'][0]
-
             if with_metrics:
                 # calculate metrics
                 for name, opt_ in self.opt['val']['metrics'].items():
@@ -296,24 +293,23 @@ class ResShiftModel(SRRSModel):
             if save_img:
                 visual_fodler = self.opt['path']['visualization']
 
-                rgb_path = osp.join(visual_fodler, "RGB", dataset_name, img_name)
+                rgb_path = osp.join(visual_fodler, dataset_name, img_name, "RGB")
                 rgb_dict = {
                     "lq": lq_img[..., :3],
                     "gt": gt_img[..., :3] if gt_img is not None else None,
                     f"sr_{current_iter}": sr_img[..., :3],
                     f"all_{current_iter}": sr_all[..., :3],
                 }
-                self.rswrite(rgb_path, rgb_dict, is_rgb_order=True)
+                self.rswrite(str(rgb_path), rgb_dict, is_rgb_order=True)
 
-                if len(band_idx) == 4:
-                    nir_path = osp.join(visual_fodler, "NIR", dataset_name, img_name)
-                    nir_dict = {
-                        "lq": lq_img[..., [3]],
-                        "gt": gt_img[..., [3]] if gt_img is not None else None,
-                        f"sr_{current_iter}": sr_img[..., [3]],
-                        f"all_{current_iter}": sr_all[..., [3]],
-                    }
-                    self.rswrite(nir_path, nir_dict, is_rgb_order=False)
+                nss_path = osp.join(visual_fodler, dataset_name, img_name, "NSS")
+                nss_dict = {
+                    "lq": lq_img[..., 3:],
+                    "gt": gt_img[..., 3:] if gt_img is not None else None,
+                    f"sr_{current_iter}": sr_img[..., 3:],
+                    f"all_{current_iter}": sr_all[..., 3:],
+                }
+                self.rswrite(str(nss_path), nss_dict, is_rgb_order=True)
 
                 if with_metrics:
                     save_csv_file = osp.join(visual_fodler, f"{dataset_name}_{current_iter}.csv")

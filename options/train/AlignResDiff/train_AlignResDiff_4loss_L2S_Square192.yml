@@ -1,0 +1,286 @@
+# general settings
+name: train_AlignResDiff_encoder_decoder_diffusion_sr_loss_x3_L2S_square192_500k_B12G1amp_wandb
+model_type: AlignJointDiffModel
+scale: 3
+num_gpu: auto
+manual_seed: 0
+
+# network structures
+network_g:
+  type: ResNetAE_SwinUNet
+  align_autoencoder_args:
+    num_in_ch: 12
+    num_out_ch: 6
+    num_feat: 64
+    num_block: 8
+  unet_args:
+    image_size: 64
+    in_channels: 6
+    model_channels: 160
+    out_channels: 6
+    attention_resolutions: [ 72, 36, 18, 9 ]
+    dropout: 0
+    channel_mult: [ 1, 2, 2, 4 ]
+    num_res_blocks: [ 2, 2, 2, 2 ]
+    conv_resample: True
+    dims: 2
+    use_fp16: False
+    num_head_channels: 32
+    use_scale_shift_norm: True
+    resblock_updown: False
+    swin_depth: 2
+    swin_embed_dim: 192
+    window_size: 8
+    mlp_ratio: 4
+    cond_lq: True
+    lq_size: 64
+
+
+diffusion:
+  sf: 3
+  schedule_name: exponential
+  schedule_kwargs:
+    power: 0.3
+  etas_end: 0.99
+  steps: 15
+  min_noise_level: 0.04
+  kappa: 2.0
+  weighted_mse: False
+  predict_type: xstart
+  timestep_respacing: ~
+  # scale_factor: 1.0
+  normalize_input: True
+  latent_flag: False
+
+# path
+path:
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: L2S_square_train
+    type: L2SSingleHMSplitDataset
+    root_path: "data/single_square"
+    split_percent: [ 0.999, 0.001 ]
+    split: 0
+    phase: "train"
+    psnr_min: 24
+    psnr_max: 38
+    ssim_min: 0.8
+    gt_size: 192
+    use_hflip: True
+    use_rot: True
+
+    # data loader
+    num_worker_per_gpu: 6
+    batch_size_per_gpu: 12
+    dataset_enlarge_ratio: 1
+    prefetch_mode: ~
+
+  val:
+    name: L2S_square_val
+    type: L2SSingleHMSplitDataset
+    root_path: "data/single_square"
+    split_percent: [ 0.999, 0.001 ]
+    split: 1
+    phase: "val"
+    psnr_min: 24
+    psnr_max: 38
+    ssim_min: 0.8
+    gt_size: 192
+    use_hflip: True
+    use_rot: True
+
+# training settings
+train:
+  use_amp: true
+  ema_decay: 0.999
+  optim_g:
+    type: Adam
+    lr: !!float 5e-5
+    weight_decay: 0
+    betas: [0.9, 0.99]
+
+  scheduler:
+    type: MultiStepLR
+    milestones: [250000, 400000, 450000, 475000]
+    gamma: 0.5
+
+  encoder_opt:
+    type: EncoderLoss
+    loss_weight: 1.0
+    strategy: 'lq'
+    reduction: 'mean'
+  decoder_opt:
+    type: MSELoss
+    loss_weight: 1.0
+    reduction: 'mean'
+  sr_opt:
+    type: MSELoss
+    loss_weight: 1.0
+    reduction: 'mean'
+
+  total_iter: 500000
+  warmup_iter: -1
+
+# validation settings
+val:
+  val_freq: 5000
+  save_img: true
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+    psnr_red:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 0
+    psnr_green:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 1
+    psnr_blue:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 2
+    psnr_nir:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 3
+    psnr_swir16:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 4
+    psnr_swir22:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 5
+    ssim:
+      type: calculate_ssim
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+    ssim_red:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 0
+    ssim_green:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 1
+    ssim_blue:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 2
+    ssim_nir:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 3
+    ssim_swir16:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 4
+    ssim_swir22:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 5
+    lpips_red:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 0
+    lpips_green:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 1
+    lpips_blue:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 2
+    lpips_nir:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 3
+    lpips_swir16:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 4
+    lpips_swir22:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 5
+    niqe_red:
+      type: calculate_niqe_band
+      crop_border: 4
+      better: lower
+      band: 0
+    niqe_green:
+      type: calculate_niqe_band
+      crop_border: 4
+      better: lower
+      band: 1
+    niqe_blue:
+      type: calculate_niqe_band
+      crop_border: 4
+      better: lower
+      band: 2
+    niqe_nir:
+      type: calculate_niqe_band
+      crop_border: 4
+      better: lower
+      band: 3
+    niqe_swir16:
+      type: calculate_niqe_band
+      crop_border: 4
+      better: lower
+      band: 4
+    niqe_swir22:
+      type: calculate_niqe_band
+      crop_border: 4
+      better: lower
+      band: 5
+
+# logging settings
+logger:
+  print_freq: 100
+  save_checkpoint_freq: 10000
+  use_tb_logger: true
+  wandb:
+    project: L2S_Single_square
+    resume_id: ~
+

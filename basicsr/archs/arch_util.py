@@ -88,6 +88,38 @@ class ResidualBlockNoBN(nn.Module):
         return identity + out * self.res_scale
 
 
+class CAM(nn.Module):
+    def __init__(self, channels, r):
+        super(CAM, self).__init__()
+        self.channels = channels
+        self.r = r
+        self.linear_max = nn.Sequential(
+            nn.Linear(in_features=self.channels, out_features=self.channels//self.r, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_features=self.channels//self.r, out_features=self.channels, bias=True))
+
+    def forward(self, x):
+        max = F.adaptive_max_pool2d(x, output_size=1)
+        avg = F.adaptive_avg_pool2d(x, output_size=1)
+        b, c, _, _ = x.size()
+        linear_max = self.linear(max.view(b,c)).view(b, c, 1, 1)
+        linear_avg = self.linear(avg.view(b,c)).view(b, c, 1, 1)
+        output = linear_max + linear_avg
+        output = F.sigmoid(output) * x
+        return output
+
+
+class CAB(nn.Module):
+    def __init__(self, num_feat=64, res_scale=1, r=2):
+        super().__init__()
+        self.conv_block = ResidualBlockNoBN(num_feat, res_scale)
+        self.cam = CAM(channels=num_feat, r=r)
+
+    def forward(self, x):
+        x = self.conv_block(x)
+        x = self.cam(x)
+        return x
+
 class Upsample(nn.Sequential):
     """Upsample module.
 

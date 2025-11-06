@@ -26,7 +26,7 @@ class BaseModel():
     def optimize_parameters(self):
         pass
 
-    def get_current_visuals(self):
+    def get_current_visuals(self, current_iter: int):
         pass
 
     def save(self, epoch, current_iter):

@@ -1,0 +1,220 @@
+# general settings
+name: train_SwinIR_StyleCNN_x3_L2S_singleHM288_500k_B16G1amp_wandb
+model_type: SwinIRHMModel
+scale: 3
+num_gpu: auto
+manual_seed: 0
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: L2S_single_train
+    type: L2SSingleHMSplitDataset
+    root_path: "data/single_time_no_sea_no_coreg"
+    split_percent: [ 0.999, 0.001 ]
+    split: 0
+    phase: "train"
+    psnr_thresh: 24
+    ssim_thresh: 0.8
+    gt_size: 288
+    use_hflip: True
+    use_rot: True
+
+    # data loader
+    num_worker_per_gpu: 6
+    batch_size_per_gpu: 8
+    dataset_enlarge_ratio: 1
+    prefetch_mode: ~
+
+  val:
+    name: L2S_single_val
+    type: L2SSingleHMSplitDataset
+    root_path: "data/single_time_no_sea_no_coreg"
+    split_percent: [ 0.999, 0.001 ]
+    split: 1
+    phase: "val"
+    psnr_thresh: 24
+    ssim_thresh: 0.8
+    gt_size: 288
+    use_hflip: True
+    use_rot: True
+
+# network structures
+network_g:
+  type: SwinIR_StyleCNN
+  sr_net_args:
+    upscale: 3
+    in_chans: 6
+    img_size: 96
+    window_size: 6
+    img_range: 1.
+    depths: [6, 6, 6, 6, 6, 6]
+    embed_dim: 180
+    num_heads: [6, 6, 6, 6, 6, 6]
+    mlp_ratio: 2
+    upsampler: 'pixelshuffle'
+    resi_connection: '1conv'
+  style_net_args:
+    in_chans: 6
+    out_chans: 6
+
+# path
+path:
+  pretrain_network_g: ~
+  strict_load_g: false
+  resume_state: "experiments/train_SwinIR_StyleCNN_x3_L2S_singleHM288_500k_B16G1amp_wandb/training_states/70000.state"
+
+# training settings
+train:
+  use_amp: true
+  ema_decay: 0.999
+  optim_g:
+    type: Adam
+    lr: !!float 2e-4
+    weight_decay: 0
+    betas: [0.9, 0.99]
+
+  scheduler:
+    type: MultiStepLR
+    milestones: [250000, 400000, 450000, 475000]
+    gamma: 0.5
+
+  total_iter: 500000
+  warmup_iter: -1  # no warm up
+
+  # losses
+  pixel_opt:
+    type: L1Loss
+    loss_weight: 1.0
+    reduction: mean
+
+hm_loss_weight: 0.9
+gt_loss_weight: 0.1
+
+# validation settings
+val:
+  val_freq: 5000
+  save_img: true
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+    psnr_red:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 0
+    psnr_green:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 1
+    psnr_blue:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 2
+    psnr_nir:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 3
+    psnr_swir16:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 4
+    psnr_swir22:
+      type: calculate_psnr_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+      band: 5
+    ssim:
+      type: calculate_ssim
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+    ssim_red:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 0
+    ssim_green:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 1
+    ssim_blue:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 2
+    ssim_nir:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 3
+    ssim_swir16:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 4
+    ssim_swir22:
+      type: calculate_ssim_band
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+      band: 5
+    lpips_red:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 0
+    lpips_green:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 1
+    lpips_blue:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 2
+    lpips_nir:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 3
+    lpips_swir16:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 4
+    lpips_swir22:
+      type: calculate_lpips_band
+      crop_border: 4
+      better: lower
+      band: 5
+
+# logging settings
+logger:
+  print_freq: 100
+  save_checkpoint_freq: 10000
+  use_tb_logger: true
+  wandb:
+    project: L2S_HisMatch
+    resume_id: ~

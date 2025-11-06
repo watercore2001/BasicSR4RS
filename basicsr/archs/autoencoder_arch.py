@@ -19,7 +19,7 @@ class VQModelTorch(nn.Module):
                  n_embed,
                  embed_dim,
                  remap=None,
-                 rank=8,    # rank for lora
+                 rank=8,        # rank for lora
                  lora_alpha=1.0,
                  lora_tune_decoder=False,
                  sane_index_shape=False,  # tell vector quantizer to return indices as bhw
@@ -61,6 +61,8 @@ class VQModelTorch(nn.Module):
         dec = self.decode(h, force_not_quantize)
         return dec
 
+
+@ARCH_REGISTRY.register()
 class AutoencoderKLTorch(torch.nn.Module):
     def __init__(self,
                  ddconfig,

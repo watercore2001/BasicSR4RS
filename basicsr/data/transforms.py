@@ -1,7 +1,9 @@
 import cv2
 import random
 import torch
-
+import numpy as np
+import skimage
+from torchvision.transforms import Normalize
 
 def mod_crop(img, scale):
     """Mod crop images, used during testing.
@@ -24,7 +26,7 @@ def mod_crop(img, scale):
 
 
 def paired_random_crop(img_gts, img_lqs, gt_patch_size, scale, gt_path=None):
-    """Paired random crop. Support Numpy array and Tensor inputs. Input image dimension order: HWC
+    """Paired random crop. Support Numpy array and Tensor inputs.
 
     It crops lists of lq and gt images with corresponding locations.
 
@@ -32,6 +34,8 @@ def paired_random_crop(img_gts, img_lqs, gt_patch_size, scale, gt_path=None):
         img_gts (list[ndarray] | ndarray | list[Tensor] | Tensor): GT images. Note that all images
             should have the same shape. If the input is an ndarray, it will
             be transformed to a list containing itself.
+            Input numpy shape: hwc
+            Input tensor shape: chw
         img_lqs (list[ndarray] | ndarray): LQ images. Note that all images
             should have the same shape. If the input is an ndarray, it will
             be transformed to a list containing itself.
@@ -92,7 +96,7 @@ def paired_random_crop(img_gts, img_lqs, gt_patch_size, scale, gt_path=None):
 
 
 def paired_central_crop(img_gts, img_lqs, gt_patch_size, scale, gt_path=None):
-    """Paired random crop. Support Numpy array and Tensor inputs. Input image dimension order: HWC
+    """Paired random crop. Support Numpy array and Tensor inputs.
 
     It crops lists of lq and gt images with corresponding locations.
 
@@ -100,6 +104,8 @@ def paired_central_crop(img_gts, img_lqs, gt_patch_size, scale, gt_path=None):
         img_gts (list[ndarray] | ndarray | list[Tensor] | Tensor): GT images. Note that all images
             should have the same shape. If the input is an ndarray, it will
             be transformed to a list containing itself.
+            Input numpy shape: hwc
+            Input tensor shape: chw
         img_lqs (list[ndarray] | ndarray): LQ images. Note that all images
             should have the same shape. If the input is an ndarray, it will
             be transformed to a list containing itself.
@@ -245,3 +251,90 @@ def img_rotate(img, angle, center=None, scale=1.0):
     matrix = cv2.getRotationMatrix2D(center, angle, scale)
     rotated_img = cv2.warpAffine(img, matrix, (w, h))
     return rotated_img
+
+
+def chw2hwc(x: np.ndarray):
+    return np.ascontiguousarray(x.transpose(1, 2, 0))
+
+
+def resize_hwc(array, scale_factor):
+    """
+    将 HWC 形状的 numpy.ndarray 放缩指定倍数，使用最近邻插值。
+
+    参数:
+        array: numpy.ndarray，形状为 (H, W, C)
+        scale_factor: float，放缩因子（例如 2.0）
+
+    返回:
+        缩放后的 numpy.ndarray，形状为 (H * scale_factor, W * scale_factor, C)
+    """
+    H, W, C = array.shape
+    resized = np.zeros((int(H * scale_factor), int(W * scale_factor), C), dtype=array.dtype)
+
+    for i in range(C):
+        resized[:, :, i] = skimage.transform.resize(
+            array[:, :, i],
+            (int(H * scale_factor), int(W * scale_factor)),
+            order=0,  # 最近邻插值
+            preserve_range=True,
+            anti_aliasing=False
+        )
+    return resized
+
+
+class SatNorm:
+    """
+    1. 变为地表反射率
+    2. 除以最大反射率，归一化到 [0,1]
+    3. 归一化为 [-1,1]
+    """
+    def __init__(self, scale_to_sr: float, offset_to_sr: float, max_sr: float, band_num: int):
+        self.scale_to_sr = scale_to_sr
+        self.offset_to_sr = offset_to_sr
+        self.max_sr = max_sr
+
+        self.norm = Normalize(mean=[0.5] * band_num, std=[0.5] * band_num)
+
+    def __call__(self, input_tensor: torch.Tensor) -> torch.Tensor:
+        x = input_tensor * self.scale_to_sr + self.offset_to_sr
+        x = x / self.max_sr
+        x = self.norm(x)
+        return x
+
+
+class LandsatNorm(SatNorm):
+    def __init__(self, band_num: int, max_sr: float):
+        super().__init__(scale_to_sr=0.0000275, offset_to_sr=(-0.2), band_num=band_num, max_sr=max_sr)
+
+
+class SentinelNorm(SatNorm):
+    def __init__(self, band_num: int, max_sr: float):
+        super().__init__(scale_to_sr=0.0001, offset_to_sr=0, band_num=band_num, max_sr=max_sr)
+
+
+def build_normalizer(source_dict, bands):
+    mean = [source_dict[band]["mean"] for band in bands]
+    std = [source_dict[band]["std"] for band in bands]
+    return Mean2StdNormalize(mean=mean, std=std)
+
+
+class Mean2StdNormalize:
+    """
+    对 CHW 形状的 Sentinel-2 图像进行归一化，范围为 mean ± 2*std 映射到 [-1, 1]。
+    输入必须为 torch.Tensor 类型，形状为 (C, H, W)。
+    """
+
+    def __init__(self, mean: list[float], std: list[float]):
+        self.mean = torch.tensor(mean).view(-1, 1, 1)
+        self.std = torch.tensor(std).view(-1, 1, 1)
+
+    def __call__(self, image: torch.Tensor):
+        if image.shape[0] != self.mean.shape[0]:
+            raise ValueError(f"Expected {self.mean.shape[0]} channels, but got {image.shape[0]}")
+
+        scale = 1
+        min_value = self.mean - scale * self.std
+        max_value = self.mean + scale * self.std
+
+        normalized = 2 * (image - min_value) / (max_value - min_value) - 1
+        return torch.clamp(normalized, -1.0, 1.0)

@@ -49,6 +49,46 @@ def calculate_psnr(img, img2, crop_border, input_order='HWC', test_y_channel=Fal
 
 
 @METRIC_REGISTRY.register()
+def calculate_psnr_band(img, img2, crop_border, band, input_order='HWC', test_y_channel=False, **kwargs):
+    """Calculate PSNR for a specific band (channel) of the input images.
+
+    Args:
+        img (ndarray): Images with range [0, 255].
+        img2 (ndarray): Images with range [0, 255].
+        crop_border (int): Cropped pixels in each edge of an image.
+        band (int): Index of the band (channel) to calculate PSNR on.
+        test_y_channel (bool): Test on Y channel of YCbCr. Default: False.
+        input_order (str): 'HWC' or 'CHW'. Default: 'HWC'.
+
+    Returns:
+        float: PSNR result for the specified band.
+    """
+
+    assert img.shape == img2.shape, f'Image shapes are different: {img.shape}, {img2.shape}.'
+    if input_order == 'HWC':
+        assert band < img.shape[2], f'Band index {band} out of range for shape {img.shape}.'
+        img_band = img[:, :, band]
+        img2_band = img2[:, :, band]
+    elif input_order == 'CHW':
+        assert band < img.shape[0], f'Band index {band} out of range for shape {img.shape}.'
+        img_band = img[band, :, :]
+        img2_band = img2[band, :, :]
+    else:
+        raise ValueError(f'Wrong input_order {input_order}. Supported input_orders are "HWC" and "CHW".')
+
+    # Expand to 3D shape to match 'HWC' format expected by calculate_psnr
+    if input_order == 'HWC':
+        img_band = img_band[:, :, np.newaxis]
+        img2_band = img2_band[:, :, np.newaxis]
+    else:  # CHW
+        img_band = img_band[np.newaxis, :, :]
+        img2_band = img2_band[np.newaxis, :, :]
+
+    return calculate_psnr(img_band, img2_band, crop_border,
+                          input_order=input_order, test_y_channel=test_y_channel, **kwargs)
+
+
+@METRIC_REGISTRY.register()
 def calculate_psnr_pt(img, img2, crop_border, test_y_channel=False, **kwargs):
     """Calculate PSNR (Peak Signal-to-Noise Ratio) (PyTorch version).
 
@@ -126,6 +166,44 @@ def calculate_ssim(img, img2, crop_border, input_order='HWC', test_y_channel=Fal
     for i in range(img.shape[2]):
         ssims.append(_ssim(img[..., i], img2[..., i]))
     return np.array(ssims).mean()
+
+
+@METRIC_REGISTRY.register()
+def calculate_ssim_band(img, img2, crop_border, band, input_order='HWC', **kwargs):
+    """Calculate SSIM for a specific band (channel) of the input images.
+
+    Args:
+        img (ndarray): Images with range [0, 255].
+        img2 (ndarray): Images with range [0, 255].
+        crop_border (int): Cropped pixels in each edge of an image.
+        band (int): Index of the band (channel) to calculate SSIM on.
+        input_order (str): 'HWC' or 'CHW'. Default: 'HWC'.
+
+    Returns:
+        float: SSIM result for the specified band.
+    """
+
+    assert img.shape == img2.shape, f'Image shapes are different: {img.shape}, {img2.shape}.'
+    if input_order == 'HWC':
+        assert band < img.shape[2], f'Band index {band} out of range for shape {img.shape}.'
+        img_band = img[:, :, band]
+        img2_band = img2[:, :, band]
+    elif input_order == 'CHW':
+        assert band < img.shape[0], f'Band index {band} out of range for shape {img.shape}.'
+        img_band = img[band, :, :]
+        img2_band = img2[band, :, :]
+    else:
+        raise ValueError(f'Wrong input_order {input_order}. Supported input_orders are "HWC" and "CHW".')
+
+    # Crop borders if needed
+    if crop_border != 0:
+        img_band = img_band[crop_border:-crop_border, crop_border:-crop_border]
+        img2_band = img2_band[crop_border:-crop_border, crop_border:-crop_border]
+
+    img_band = img_band.astype(np.float64)
+    img2_band = img2_band.astype(np.float64)
+
+    return _ssim(img_band, img2_band)
 
 
 @METRIC_REGISTRY.register()

@@ -1,0 +1,76 @@
+# ----------- Commands for running
+# ----------- Single GPU
+# PYTHONPATH="./:${PYTHONPATH}"  CUDA_VISIBLE_DEVICES=0 python basicsr/test.py -opt options/test/SRResNet_SRGAN/test_MSRResNet_x4.yml
+
+# general settings
+name: vqgan8192_x4_SEN2NAIPv2
+model_type: TamingModel
+scale: 4
+num_gpu: auto
+manual_seed: 0
+
+# test dataset settings
+datasets:
+  test_1:  # the 1st test dataset
+    name: S2N_hismatch_val
+    type: TacoSplitDataset
+    taco_paths:
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0000.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0001.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0002.part.taco"
+      - "data/SEN2NAIPv2/sen2naipv2-histmatch.0003.part.taco"
+    split_percent: [ 0.999, 0.001 ]
+    split: 1
+    phase: "val"
+    scale: 4
+    gt_size: 256
+
+# network structures
+network_g:
+  type: VQModelTorch
+  embed_dim: 4
+  n_embed: 8192
+  ddconfig:
+    double_z: False
+    z_channels: 4
+    resolution: 256
+    in_channels: 4
+    out_ch: 4
+    ch: 128
+    ch_mult: [ 1,2,4 ]
+    num_res_blocks: 2
+    attn_resolutions: [ ]
+    dropout: 0.0
+    padding_mode: zeros
+
+# path
+path:
+  pretrain_network_g: "experiments/pretrained_models/sen2naip256_vq_f4_dim4.pth"
+  param_key_g: ~
+  strict_load_g: true
+
+# validation settings
+val:
+  save_img: true
+  suffix: ~  # add suffix to saved images, different with other experiment
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 4
+      test_y_channel: false
+      better: higher  # the higher, the better. Default: higher
+    ssim:
+      type: calculate_ssim
+      crop_border: 4
+      test_y_channel: false
+      better: higher
+    rgb_niqe:
+      type: calculate_rs_niqe
+      input_bands: [ 2, 1, 0 ]
+      crop_border: 4
+      better: lower
+    nir_niqe:
+      type: calculate_rs_niqe
+      input_bands: [ 3 ]
+      crop_border: 4
+      better: lower

@@ -223,6 +223,7 @@ def count_flops_attn(model, _x, y):
     matmul_ops = 2 * b * (num_spatial ** 2) * c
     model.total_ops += th.DoubleTensor([matmul_ops])
 
+
 class AttentionBlock(nn.Module):
     """
     An attention block that allows spatial positions to attend to each other.
@@ -264,6 +265,7 @@ class AttentionBlock(nn.Module):
         h = self.proj_out(h)
         return (x + h).reshape(b, c, *spatial)
 
+
 class QKVAttentionLegacy(nn.Module):
     """
     A module which performs QKV attention. Matches legacy QKVAttention + input/ouput heads shaping
@@ -303,6 +305,7 @@ class QKVAttentionLegacy(nn.Module):
     @staticmethod
     def count_flops(model, _x, y):
         return count_flops_attn(model, _x, y)
+
 
 class QKVAttention(nn.Module):
     """
@@ -344,6 +347,7 @@ class QKVAttention(nn.Module):
     @staticmethod
     def count_flops(model, _x, y):
         return count_flops_attn(model, _x, y)
+
 
 class UNetModel(nn.Module):
     """
@@ -602,6 +606,7 @@ class UNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
+
 @ARCH_REGISTRY.register()
 class UNetModelSwin(nn.Module):
     """
@@ -705,7 +710,7 @@ class UNetModelSwin(nn.Module):
             self.feature_extractor = nn.Sequential(*feature_extractor)
 
         ch = input_ch = int(channel_mult[0] * model_channels)
-        in_channels += base_chn
+        in_channels += base_chn # 因为 cond_lq ，所以 in_channels 加上 base_chn
         self.input_blocks = nn.ModuleList(
             [TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))]
         )
@@ -724,6 +729,7 @@ class UNetModelSwin(nn.Module):
                     )
                 ]
                 ch = int(mult * model_channels)
+                # jj=0 表示 swin 在第一个 resblock 之后
                 if ds in attention_resolutions and jj==0:
                     layers.append(
                         BasicLayer(
@@ -882,8 +888,12 @@ class UNetModelSwin(nn.Module):
                 assert self.cond_mask
                 lq = th.cat([lq, mask], dim=1)
             lq = self.feature_extractor(lq.type(self.dtype))
-            x = th.cat([x, lq], dim=1)
 
+            import torch.nn.functional as F
+            b, c, h, w = x.size()
+            lq = F.interpolate(lq, size=(h, w), mode='bicubic')
+
+            x = th.cat([x, lq], dim=1)
 
         h = x.type(self.dtype)
         for ii, module in enumerate(self.input_blocks):
@@ -913,6 +923,7 @@ class UNetModelSwin(nn.Module):
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
+
 
 class ResBlockConv(TimestepBlock):
     """
@@ -1005,6 +1016,7 @@ class ResBlockConv(TimestepBlock):
             h = h + emb_out
             h = self.out_layers(h)
         return self.skip_connection(x) + h
+
 
 class UNetModelConv(nn.Module):
     """

@@ -7,8 +7,9 @@ from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
 from skimage.util import img_as_ubyte
 
+
 def img2tensor(imgs, bgr2rgb=True, float32=True):
-    """Numpy array to tensor.
+    """Numpy array HWC to tensor CHW.
 
     Args:
         imgs (list[ndarray] | ndarray): Input images.
@@ -16,7 +17,7 @@ def img2tensor(imgs, bgr2rgb=True, float32=True):
         float32 (bool): Whether to change to float32.
 
     Returns:
-        list[tensor] | tensor: Tensor images. If returned results only have
+        list[tensor] | tensor: Tensor images in shape CHW. If returned results only have
             one element, just return tensor.
     """
 
@@ -95,16 +96,32 @@ def tensor2img(tensor, rgb2bgr=True, out_type=np.uint8, min_max=(0, 1)):
     return result
 
 
-def tensor2ubyte_image(tensor, ):
-    """Convert torch Tensors into image numpy arrays.
+def minusone_one_tensor_to_ubyte_numpy(tensor) -> np.ndarray:
+    """Convert torch Tensors into image numpy arrays. Must be scaled as -1 to 1 before input
 
-    scale rule: For each tensor in the input batch, use min/max value to scale as  ubyte
+    scale rule: For each tensor in the input batch, use 0-1 value to scale as ubyte
 
     Args:
         tensor: BCHW float32
 
     Returns:
-        Tensor : H(BW)C ubyte numpy
+        numpy : H(BW)C ubyte
+    """
+    result = torch.clamp(tensor, -1, 1)
+    result = (result + 1) / 2
+    return zero_one_tensor_to_ubyte_numpy(result)
+
+
+def zero_one_tensor_to_ubyte_numpy(tensor) -> np.ndarray:
+    """Convert torch Tensors into image numpy arrays. Must be scaled as 0-1 before input
+
+    scale rule: For each tensor in the input batch, use 0-1 value to scale as ubyte
+
+    Args:
+        tensor: BCHW float32
+
+    Returns:
+        numpy : H(BW)C ubyte
     """
     img_np = make_grid(tensor, nrow=tensor.size(0), normalize=True, value_range=(0, 1)).numpy()
     img_np = img_np.transpose(1, 2, 0)
@@ -153,7 +170,7 @@ def imwrite(img, file_path, params=None, auto_mkdir=True):
     """Write image to file.
 
     Args:
-        img (ndarray): Image array to be written.
+        img (ndarray): Image array to be written. shape: h w bgr
         file_path (str): Image file path.
         params (None or list): Same as opencv's :func:`imwrite` interface.
         auto_mkdir (bool): If the parent folder of `file_path` does not exist,
@@ -168,6 +185,7 @@ def imwrite(img, file_path, params=None, auto_mkdir=True):
     ok = cv2.imwrite(file_path, img, params)
     if not ok:
         raise IOError('Failed in writing images.')
+
 
 def save_lq_sr_image(lq_img: np.ndarray, sr_img: np.ndarray, all_path: str):
     """
@@ -228,6 +246,7 @@ def save_all_image(lq_img: np.ndarray, sr_img: np.ndarray, gt_img: np.ndarray, a
     os.makedirs(dir_name, exist_ok=True)
     plt.savefig(all_path, dpi=100, bbox_inches='tight')
     plt.close('all')
+
 
 def crop_border(imgs, crop_border):
     """Crop borders of images.

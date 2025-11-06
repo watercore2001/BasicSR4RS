@@ -4,6 +4,7 @@ import numpy as np
 import tacoreader
 from tacoreader import TortillaDataFrame
 from torch.utils import data
+from torchvision.transforms import Normalize
 
 from basicsr.data.transforms import augment, paired_random_crop, paired_central_crop
 from basicsr.utils import img2tensor
@@ -21,12 +22,16 @@ class TacoDataset(data.Dataset):
             gt_size: int. HR image size.
             use_hflip: bool. Whether to horizontally flip the image.
             use_rot: bool. Whether to rotate 90angle the image.
+            bands: list[int]
     """
-    normalize_max = 3000
-
     def __init__(self, opt: dict):
         self.opt = opt
         self.scale = opt['scale']
+
+        self.band_idx = opt['band_idx']
+        self.scale_max = 3000
+        self.norm = Normalize(mean=[0.5]*len(self.band_idx), std=[0.5] * len(self.band_idx))
+
         # Load the dataset once in memory
         self.dataset: TortillaDataFrame = tacoreader.load(opt["taco_paths"])
         self.cache = {}
@@ -41,8 +46,8 @@ class TacoDataset(data.Dataset):
 
         # Load lr and hr images. Dimension Order: CHW. Channel Order: RGB NIR.
         with rio.open(lq_path) as src, rio.open(gt_path) as dst:
-            img_lq: np.ndarray = src.read()
-            img_gt: np.ndarray = dst.read()
+            img_lq: np.ndarray = src.read(self.band_idx)
+            img_gt: np.ndarray = dst.read(self.band_idx)
 
         # change dimension to HWC.
         # ascontiguousarray() for opencv.
@@ -70,22 +75,22 @@ class TacoDataset(data.Dataset):
         img_lq = img_lq.astype(np.float32)
         img_gt, img_lq = img2tensor([img_gt, img_lq], bgr2rgb=False, float32=True)
 
-        # normalized
-        img_lq = img_lq / self.normalize_max
-        img_gt = img_gt / self.normalize_max
+        # normalized [-1, 1]
+        img_lq = self.norm(img_lq / self.scale_max)
+        img_gt = self.norm(img_gt / self.scale_max)
 
-        return {'lq': img_lq, 'gt': img_gt, 'lq_path': lq_path, 'gt_path': gt_path}
+        # B RGB+NIR H W
+        return {'lq': img_lq, 'gt': img_gt, 'lq_path': lq_path, 'gt_path': gt_path, 'band_idx': self.band_idx}
 
 
 @DATASET_REGISTRY.register()
 class TacoSplitDataset(torch.utils.data.Dataset):
-    generator = torch.Generator().manual_seed(0)
 
     def __init__(self, opt):
         self.opt = opt
         split_percent = self.opt['split_percent']
         overall_dataset = TacoDataset(opt)
-        datasets = data.random_split(overall_dataset, split_percent, self.generator)
+        datasets = data.random_split(overall_dataset, split_percent, torch.Generator().manual_seed(0))
 
         split = opt['split']
         self.dataset = datasets[split]

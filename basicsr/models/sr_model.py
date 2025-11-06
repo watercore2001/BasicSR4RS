@@ -17,6 +17,9 @@ from .base_model import BaseModel
 class SRModel(BaseModel):
     """Base SR model for single image super-resolution."""
 
+    def build_optional_loss(self, opt_dict, key):
+        return build_loss(opt_dict[key]).to(self.device) if key in opt_dict else None
+
     def __init__(self, opt):
         super(SRModel, self).__init__(opt)
 
@@ -56,15 +59,8 @@ class SRModel(BaseModel):
             self.net_g_ema.eval()
 
         # define losses
-        if train_opt.get('pixel_opt'):
-            self.cri_pix = build_loss(train_opt['pixel_opt']).to(self.device)
-        else:
-            self.cri_pix = None
-
-        if train_opt.get('perceptual_opt'):
-            self.cri_perceptual = build_loss(train_opt['perceptual_opt']).to(self.device)
-        else:
-            self.cri_perceptual = None
+        self.cri_pix = self.build_optional_loss(train_opt, 'pixel_opt')
+        self.cri_perceptual = self.build_optional_loss(train_opt, 'perceptual_opt')
 
         if self.cri_pix is None and self.cri_perceptual is None:
             raise ValueError('Both pixel and perceptual losses are None.')
@@ -266,10 +262,11 @@ class SRModel(BaseModel):
             for metric, value in self.metric_results.items():
                 tb_logger.add_scalar(f'metrics/{dataset_name}/{metric}', value, current_iter)
 
-    def get_current_visuals(self):
+    def get_current_visuals(self, current_iter: int):
         out_dict = OrderedDict()
         out_dict['lq'] = self.lq.detach().cpu()
-        out_dict['result'] = self.output.detach().cpu()
+        out_dict['sr'] = self.output.detach().cpu()
+        out_dict[f'sr_{current_iter}'] = out_dict['sr']
         if hasattr(self, 'gt'):
             out_dict['gt'] = self.gt.detach().cpu()
         return out_dict

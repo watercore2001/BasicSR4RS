@@ -141,6 +141,40 @@ def niqe(img, mu_pris_param, cov_pris_param, gaussian_window, block_size_h=96, b
     return quality
 
 
+def load_niqe_params():
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    params = np.load(os.path.join(root_dir, 'niqe_pris_params.npz'))
+    return params['mu_pris_param'], params['cov_pris_param'], params['gaussian_window']
+
+
+def preprocess_for_niqe(img, crop_border=0, input_order='HWC', convert_to:str|None = 'y', input_bands=None, band=None):
+    img = img.astype(np.float32)
+
+    # Reorder and select bands
+    if input_order != 'HW':
+        img = reorder_image(img, input_order=input_order)
+
+        if input_bands is not None:
+            img = img[..., input_bands]
+
+        if band is not None:
+            img = img[..., band]
+
+        if convert_to == 'y':
+            img = to_y_channel(img)
+        elif convert_to == 'gray':
+            img = cv2.cvtColor(img / 255., cv2.COLOR_BGR2GRAY) * 255.
+
+        img = np.squeeze(img)
+
+    # Crop borders
+    if crop_border > 0:
+        img = img[crop_border:-crop_border, crop_border:-crop_border]
+
+    # Round to match MATLAB behavior
+    return img.round()
+
+
 @METRIC_REGISTRY.register()
 def calculate_niqe(img, crop_border, input_order='HWC', convert_to='y', **kwargs):
     """Calculate NIQE (Natural Image Quality Evaluator) metric.
@@ -172,90 +206,26 @@ def calculate_niqe(img, crop_border, input_order='HWC', convert_to='y', **kwargs
     Returns:
         float: NIQE result.
     """
-    ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-    # we use the official params estimated from the pristine dataset.
-    niqe_pris_params = np.load(os.path.join(ROOT_DIR, 'niqe_pris_params.npz'))
-    mu_pris_param = niqe_pris_params['mu_pris_param']
-    cov_pris_param = niqe_pris_params['cov_pris_param']
-    gaussian_window = niqe_pris_params['gaussian_window']
-
-    img = img.astype(np.float32)
-    if input_order != 'HW':
-        img = reorder_image(img, input_order=input_order)
-        if convert_to == 'y':
-            img = to_y_channel(img)
-        elif convert_to == 'gray':
-            img = cv2.cvtColor(img / 255., cv2.COLOR_BGR2GRAY) * 255.
-        img = np.squeeze(img)
-
-    if crop_border != 0:
-        img = img[crop_border:-crop_border, crop_border:-crop_border]
-
-    # round is necessary for being consistent with MATLAB's result
-    img = img.round()
-
-    niqe_result = niqe(img, mu_pris_param, cov_pris_param, gaussian_window)
-
-    return niqe_result
+    mu, cov, window = load_niqe_params()
+    img = preprocess_for_niqe(img, crop_border, input_order, convert_to)
+    return niqe(img, mu, cov, window)
 
 
 @METRIC_REGISTRY.register()
 def calculate_rs_niqe(img, crop_border, input_order='HWC', convert_to='y',
                       input_bands: list[int] = (2, 1, 0), **kwargs):
-    """Calculate NIQE (Natural Image Quality Evaluator) metric.
+    mu, cov, window = load_niqe_params()
+    img = preprocess_for_niqe(img, crop_border, input_order, convert_to, input_bands=input_bands)
+    return niqe(img, mu, cov, window)
 
-    ``Paper: Making a "Completely Blind" Image Quality Analyzer``
 
-    This implementation could produce almost the same results as the official
-    MATLAB codes: http://live.ece.utexas.edu/research/quality/niqe_release.zip
+@METRIC_REGISTRY.register()
+def calculate_niqe_band(img, crop_border: int, band: int, input_order='HWC', **kwargs):
+    mu, cov, window = load_niqe_params()
+    img = preprocess_for_niqe(img, crop_border, input_order, convert_to=None, band=band)
+    return niqe(img, mu, cov, window)
 
-    > MATLAB R2021a result for tests/data/baboon.png: 5.72957338 (5.7296)
-    > Our re-implementation result for tests/data/baboon.png: 5.7295763 (5.7296)
 
-    We use the official params estimated from the pristine dataset.
-    We use the recommended block size (96, 96) without overlaps.
-
-    Args:
-        img (ndarray): Input image whose quality needs to be computed.
-            The input image must be in range [0, 255] with float/int type.
-            If the input order is 'HWC' or 'CHW', it will be converted to gray
-            or Y (of YCbCr) image according to the ``convert_to`` argument.
-        crop_border (int): Cropped pixels in each edge of an image. These
-            pixels are not involved in the metric calculation.
-        input_order (str): Whether the input order is 'HW', 'HWC' or 'CHW'.
-            Default: 'HWC'.
-        convert_to (str): Whether converted to 'y' (of MATLAB YCbCr) or 'gray'.
-            Default: 'y'.
-        input_bands: used_band for calculating NIQE. input channel order is RGBNIR...
-            Default: (2,1,0) RGB to BGR
-    Returns:
-        float: NIQE result.
-    """
-    ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-    # we use the official params estimated from the pristine dataset.
-    niqe_pris_params = np.load(os.path.join(ROOT_DIR, 'niqe_pris_params.npz'))
-    mu_pris_param = niqe_pris_params['mu_pris_param']
-    cov_pris_param = niqe_pris_params['cov_pris_param']
-    gaussian_window = niqe_pris_params['gaussian_window']
-
-    img = img.astype(np.float32)
-
-    if input_order != 'HW':
-        img = reorder_image(img, input_order=input_order)
-        img = img[..., input_bands]
-
-        if convert_to == 'y':
-            img = to_y_channel(img)
-        elif convert_to == 'gray':
-            img = cv2.cvtColor(img / 255., cv2.COLOR_BGR2GRAY) * 255.
-        img = np.squeeze(img)
-
-    if crop_border != 0:
-        img = img[crop_border:-crop_border, crop_border:-crop_border]
-
-    # round is necessary for being consistent with MATLAB's result
-    img = img.round()
-
-    niqe_result = niqe(img, mu_pris_param, cov_pris_param, gaussian_window)
-
-    return niqe_result
+@METRIC_REGISTRY.register()
+def calculate_niqe_none(**kwargs):
+    return -1

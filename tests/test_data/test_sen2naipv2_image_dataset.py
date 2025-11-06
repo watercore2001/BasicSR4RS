@@ -7,8 +7,9 @@ from matplotlib import pyplot as plt
 import torchvision.utils as vutils
 import cv2
 
+
 def test_cross_sensor():
-    path = "/mnt/code/deep_learning/BasicSR/datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
+    path = "/data/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
     dataloader = TacoDataset(path)
     datamodule = torch.utils.data.DataLoader(dataloader, batch_size=100, shuffle=False)
     start = time.time()
@@ -17,6 +18,7 @@ def test_cross_sensor():
     elapsed = end - start
     assert elapsed < 1
     pass
+
 
 def test_unet():
     paths = ["/mnt/code/deep_learning/BasicSR/datasets/SEN2NAIPv2/sen2naipv2-histmatch.0000.part.taco",
@@ -31,6 +33,7 @@ def test_unet():
     elapsed = end - start
     assert elapsed < 10
     pass
+
 
 def imwrite(im_in, path, chn='rgb', dtype_in='float32', qf=None):
     '''
@@ -52,10 +55,12 @@ def imwrite(im_in, path, chn='rgb', dtype_in='float32', qf=None):
 
     return flag
 
+
 def save_tensor(im_tensor, path):
     im_tensor = vutils.make_grid(im_tensor, nrow=4, normalize=True, scale_each=True) # c x H x W
     im_np = im_tensor.cpu().permute(1,2,0).numpy()
     imwrite(im_np, path)
+
 
 def test_train():
     opt = {
@@ -76,11 +81,20 @@ def test_train():
     save_tensor(gt_tensor, "resshift2.png")
     pass
 
+
 def test_color():
-    path = "/mnt/code/deep_learning/BasicSR/datasets/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
+    path = "/mnt/code/deep_learning/BasicSR/data/SEN2NAIPv2/sen2naipv2-crosssensor.taco"
     dataset = tacoreader.load(path)
+
+    def taco2cv2(input):
+        import numpy as np
+        result = ((input / 2000) * 255).clip(0, 255).astype(np.uint8)
+        result = result[::-1, :, :]
+        return result.transpose(1, 2, 0)
+
+
     # Read a sample
-    for sample_idx in [300, 4400, 500, 600, 700, 800, 900, 1000]:
+    for sample_idx in range(480,520):
         lr = dataset.read(sample_idx).read(0)
         hr = dataset.read(sample_idx).read(1)
 
@@ -89,17 +103,19 @@ def test_color():
             lr_data = src.read([1, 2, 3], window=rio.windows.Window(0, 0, 256 // 4, 256 // 4))
             hr_data = dst.read([1, 2, 3], window=rio.windows.Window(0, 0, 256, 256))
 
-        # Display
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 5))
-        ax1.imshow(lr_data.transpose(1, 2, 0) / 3000)
-        ax1.set_title("Low Resolution - Sentinel 2")
-        ax2.imshow(hr_data.transpose(1, 2, 0) / 3000)
-        ax2.set_title("High Resolution - NAIP")
-        ax3.imshow(lr_data.transpose(1, 2, 0) / 2000)
-        ax3.set_title("Low Resolution - Sentinel 2")
-        ax4.imshow(hr_data.transpose(1, 2, 0) / 2000)
-        ax4.set_title("High Resolution - NAIP")
-        plt.show()
+        cv2.imwrite(f"visual/{sample_idx}.png", taco2cv2(hr_data))
+        #Display
+        # fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 5))
+        # ax1.imshow(lr_data.transpose(1, 2, 0) / 3000)
+        # ax1.set_title("Low Resolution - Sentinel 2")
+        # ax2.imshow(hr_data.transpose(1, 2, 0) / 3000)
+        # ax2.set_title("High Resolution - NAIP")
+        # ax3.imshow(lr_data.transpose(1, 2, 0) / 2000)
+        # ax3.set_title("Low Resolution - Sentinel 2")
+        # ax4.imshow(hr_data.transpose(1, 2, 0) / 2000)
+        # ax4.set_title("High Resolution - NAIP")
+        # plt.show()
+
 
 def test_skimage():
     import numpy as np
@@ -116,12 +132,13 @@ def test_skimage():
     arr2 = img_as_ubyte(arr)
     pass
 
+
 def test_color2():
     import cv2
     single_band = cv2.imread("resshift2.png", 0)
     cv2.imwrite("gray.png", single_band)
-    #pseudo_color_image = cv2.applyColorMap(single_band, cv2.COLORMAP_RAINBOW)
+    pseudo_color_image = cv2.applyColorMap(single_band, cv2.COLORMAP_RAINBOW)
     cv2.imwrite("color.png", pseudo_color_image)
 
 
-test_color2()
+test_color()

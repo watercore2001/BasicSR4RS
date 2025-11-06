@@ -6,7 +6,6 @@ import numpy as np
 import torch as th
 import torch.nn.functional as F
 
-
 def get_named_eta_schedule(
         schedule_name,
         num_diffusion_timesteps,
@@ -105,14 +104,12 @@ class GaussianDiffusion:
         model_mean_type,
         loss_type,
         sf=4,
-        scale_factor=None,
         normalize_input=True,
         latent_flag=True,
     ):
         self.kappa = kappa
         self.model_mean_type = model_mean_type
         self.loss_type = loss_type
-        self.scale_factor = scale_factor
         self.normalize_input = normalize_input
         self.latent_flag = latent_flag
         self.sf = sf
@@ -450,7 +447,7 @@ class GaussianDiffusion:
                 yield out
                 z_sample = out["sample"]
 
-    def decode_first_stage(self, z_sample, first_stage_model=None, consistencydecoder=None, split_channels=3):
+    def decode_first_stage(self, z_sample, first_stage_model=None, consistencydecoder=None, no_grad=True):
         data_dtype = z_sample.dtype
 
         if first_stage_model is None:
@@ -467,34 +464,32 @@ class GaussianDiffusion:
             model_dtype = next(model.ckpt.parameters()).dtype
 
         # 缩放恢复
-        z_sample = z_sample / self.scale_factor
+        z_sample = z_sample
 
         if model_dtype != data_dtype:
             z_sample = z_sample.type(model_dtype)
 
-        B, C, H, W = z_sample.shape
-        assert C % split_channels == 0, f"输入通道数 {C} 不是 {split_channels} 的倍数，无法切分为多个 latent 块"
-
-        chunks = th.split(z_sample, split_channels, dim=1)  # 每3通道一组解码
-
-        decoded_chunks = []
-        with th.no_grad():
-            for chunk in chunks:
+        # 解码整个张量，根据 no_grad 控制是否禁用梯度
+        if no_grad:
+            with th.no_grad():
                 if consistencydecoder is None:
-                    decoded = decoder(chunk)
+                    out = decoder(z_sample)
                 else:
                     with th.cuda.amp.autocast():
-                        decoded = decoder(chunk)
-                decoded_chunks.append(decoded)
-
-        out = th.cat(decoded_chunks, dim=1)  # 按通道维度拼接回完整图像
+                        out = decoder(z_sample)
+        else:
+            if consistencydecoder is None:
+                out = decoder(z_sample)
+            else:
+                with th.cuda.amp.autocast():
+                    out = decoder(z_sample)
 
         if model_dtype != data_dtype:
             out = out.type(data_dtype)
 
         return out
 
-    def encode_first_stage(self, y, first_stage_model=None, up_sample=False, split_channels=3):
+    def encode_first_stage(self, y, first_stage_model=None, up_sample=False, no_grad=True):
         data_dtype = y.dtype
 
         if first_stage_model is None:
@@ -510,18 +505,12 @@ class GaussianDiffusion:
         if model_dtype != data_dtype:
             y = y.type(model_dtype)
 
-        B, C, H, W = y.shape
-        assert C % split_channels == 0, f"输入通道数 {C} 不是 {split_channels} 的倍数，无法切分为多个RGB块"
-
-        chunks = th.split(y, split_channels, dim=1)  # 每组 3 通道拆分
-
-        encoded_chunks = []
-        with th.no_grad():
-            for chunk in chunks:
-                encoded = first_stage_model.encode(chunk) * self.scale_factor
-                encoded_chunks.append(encoded)
-
-        out = th.cat(encoded_chunks, dim=1)
+        # 根据 no_grad 参数决定是否禁用梯度
+        if no_grad:
+            with th.no_grad():
+                out = first_stage_model.encode(y)
+        else:
+            out = first_stage_model.encode(y)
 
         if model_dtype != data_dtype:
             out = out.type(data_dtype)
@@ -542,9 +531,12 @@ class GaussianDiffusion:
 
         return y + _extract_into_tensor(self.kappa * self.sqrt_etas, t, y.shape) * noise
 
-    def training_losses(
-            self, model, x_start, y, t,
-            first_stage_model=None,
+    def forward_and_backward(
+            self,
+            model,
+            hr,
+            lr,
+            t,
             model_kwargs=None,
             noise=None,
             ):
@@ -552,62 +544,36 @@ class GaussianDiffusion:
         Compute training losses for a single timestep.
 
         :param model: the model to evaluate loss on.
-        :param first_stage_model: autoencoder model
-        :param x_start: the [N x C x ...] tensor of inputs.
-        :param y: the [N x C x ...] tensor of degraded inputs.
+        :param hr: the [N x C x ...] tensor of inputs.
+        :param lr: the [N x C x ...] tensor of degraded inputs.
         :param t: a batch of timestep indices.
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.
         :param noise: if specified, the specific Gaussian noise to try to remove.
-        :param up_sample_lq: Upsampling low-quality image before encoding
-        :return: a dict with the key "loss" containing a tensor of shape [N].
-                 Some mean or variance settings may also have other keys.
         """
         if model_kwargs is None:
             model_kwargs = {}
 
-        z_y = self.encode_first_stage(y, first_stage_model, up_sample=True) # 低分辨率图像
-        z_start = self.encode_first_stage(x_start, first_stage_model, up_sample=False) # 高分辨率图像
-
         if noise is None:
-            noise = th.randn_like(z_start)
+            noise = th.randn_like(hr)
 
-        z_t = self.q_sample(z_start, z_y, t, noise=noise) # 添加噪声
+        # 添加噪声
+        z_t = self.q_sample(hr, lr, t, noise=noise)
 
-        loss_dict = OrderedDict()
-
-        if self.loss_type == LossType.MSE or self.loss_type == LossType.WEIGHTED_MSE:
-            model_output = model(self._scale_input(z_t, t), t, **model_kwargs)
-            target = {
-                ModelMeanType.START_X: z_start,
-                ModelMeanType.RESIDUAL: z_y - z_start,
-                ModelMeanType.EPSILON: noise,
-                ModelMeanType.EPSILON_SCALE: noise*self.kappa*_extract_into_tensor(self.sqrt_etas, t, noise.shape),
-            }[self.model_mean_type]
-            assert model_output.shape == target.shape == z_start.shape
-            loss_dict["mse"] = mean_flat((target - model_output) ** 2)
-            if self.model_mean_type == ModelMeanType.EPSILON_SCALE:
-                loss_dict["mse"] /= (self.kappa**2 * _extract_into_tensor(self.etas, t, t.shape))
-            if self.loss_type == LossType.WEIGHTED_MSE:
-                weights = _extract_into_tensor(self.weight_loss_mse, t, t.shape)
-            else:
-                weights = 1
-            loss_dict["mse"] *= weights
-        else:
-            raise NotImplementedError(self.loss_type)
+        model_output = model(self._scale_input(z_t, t), t, **model_kwargs)
 
         if self.model_mean_type == ModelMeanType.START_X:      # predict x_0
-            pred_zstart = model_output
+            pred_z0 = model_output
         elif self.model_mean_type == ModelMeanType.EPSILON:
-            pred_zstart = self._predict_xstart_from_eps(x_t=z_t, y=z_y, t=t, eps=model_output)
+            pred_z0 = self._predict_xstart_from_eps(x_t=z_t, y=lr, t=t, eps=model_output)
         elif self.model_mean_type == ModelMeanType.RESIDUAL:
-            pred_zstart = self._predict_xstart_from_residual(y=z_y, residual=model_output)
+            pred_z0 = self._predict_xstart_from_residual(y=lr, residual=model_output)
         elif self.model_mean_type == ModelMeanType.EPSILON_SCALE:
-            pred_zstart = self._predict_xstart_from_eps_scale(x_t=z_t, y=z_y, t=t, eps=model_output)
+            pred_z0 = self._predict_xstart_from_eps_scale(x_t=z_t, y=lr, t=t, eps=model_output)
         else:
             raise NotImplementedError(self.model_mean_type)
 
-        return loss_dict, z_t, pred_zstart
+        return pred_z0
 
     def _scale_input(self, inputs, t):
         if self.normalize_input:
@@ -675,7 +641,6 @@ def create_gaussian_diffusion(
     weighted_mse=False,
     predict_type='xstart',
     timestep_respacing=None,
-    scale_factor=None,
     latent_flag=True,
 ):
     sqrt_etas = get_named_eta_schedule(
@@ -706,7 +671,6 @@ def create_gaussian_diffusion(
         kappa=kappa,
         model_mean_type=model_mean_type,
         loss_type=LossType.WEIGHTED_MSE if weighted_mse else LossType.MSE,
-        scale_factor=scale_factor,
         normalize_input=normalize_input,
         sf=sf,
         latent_flag=latent_flag,

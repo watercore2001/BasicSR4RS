@@ -1,30 +1,28 @@
 import functools
 from collections import OrderedDict
 from contextlib import nullcontext
-from os import path as osp
 
-from tqdm import tqdm
 from einops import rearrange
 import numpy as np
-import pandas as pd
 import torch
+import torch.nn.functional as F
 import torch._dynamo
 
-from basicsr.metrics import calculate_metric
 from basicsr.archs import build_network
-from basicsr.utils import get_root_logger, minusone_one_tensor_to_ubyte_numpy
+from basicsr.utils import get_root_logger
 from basicsr.utils.registry import MODEL_REGISTRY
-from basicsr.utils.gaussian_diffusion import create_gaussian_diffusion
-from basicsr.models.srrs_model import SRRSModel
+from basicsr.utils.gaussian_diffusion_registration import create_gaussian_diffusion
+from basicsr.models.srrs_l2s_model import L2SSingleModel
 
 
 @MODEL_REGISTRY.register()
-class ResShiftModel(SRRSModel):
+class AlignFrozenDiffModel(L2SSingleModel):
     def __init__(self, opt):
 
-        # build net_g (swin unet)
+        # init_training_settings 放在前面试试
         super().__init__(opt)
 
+        # 推理和训练都需要的属性，不能放进 init_training_settings
         # build autoencoder
         if "autoencoder" in self.opt:
             # define autoencoder
@@ -34,7 +32,7 @@ class ResShiftModel(SRRSModel):
             # load weight pth
             load_path_ae = self.opt['path'].get('pretrain_network_ae', None)
             if load_path_ae is not None:
-                self.load_network(self.autoencoder, load_path_ae, True, None)
+                self.load_network(self.autoencoder, load_path_ae, True, "params_ema")
 
             # eval autoencoder
             for params in self.autoencoder.parameters():
@@ -72,14 +70,33 @@ class ResShiftModel(SRRSModel):
         self.setup_optimizers()
         self.setup_schedulers()
 
+    def feed_data(self, data):
+        self.sample_path = data["sample_path"]
+        self.img_name = data["img_name"]
+        self.lq = torch.cat([data["lq"]["rgb"], data["lq"]["nss"]], dim=1).to(self.device)
+
+        if 'gt' in data:
+            gt = data['gt']
+            gt_rgb = gt["rgb"].to(self.device)
+
+            # 上采样 nss 图像两倍
+            gt_nss = gt["nss"].to(self.device)
+            gt_nss_up = F.interpolate(gt_nss, scale_factor=2, mode='bicubic')
+
+            # 拼接 RGB 和 NSS
+            self.gt = torch.cat([gt_rgb, gt_nss_up], dim=1)
+
+            lq_up = F.interpolate(self.lq, scale_factor=3, mode='bicubic')
+            self.reg_input = torch.cat([lq_up, self.gt], dim=1)
+
     def get_record_step_loss(self, losses, tt):
         num_timesteps = self.base_diffusion.num_timesteps
         record_steps = [1, (num_timesteps // 2) + 1, num_timesteps]  # [1, 8, 15] for 15
 
-        # 如果有两个 loss, step为 15, 那么形状为 {2: 3} 的字典
+        # 如果有两个 loss, step 为 15, 那么形状为 {2: 15} 的字典
         loss_mean = {key: torch.zeros(size=(len(record_steps),), dtype=torch.float64, device=self.device)
                      for key in losses.keys()}
-        # 记录每个step在batch中所对应的item数量，用来平均每个step的loss
+        # 记录每个 step 在 batch 中所对应的 item 数量，用来平均每个 step 的 loss
         loss_count = torch.zeros(size=(len(record_steps),), dtype=torch.float64, device=self.device)
 
         # 记录数据
@@ -121,16 +138,10 @@ class ResShiftModel(SRRSModel):
             device=self.device,
         )
 
-        # random noise for added to gt
-        latent_downsamping_factor = 2 ** (len(self.opt["autoencoder"]["ddconfig"]["ch_mult"]) - 1)
-        latent_resolution = self.gt.shape[-1] // latent_downsamping_factor
-        if "autoencoder" in self.opt:
-            noise_chn = self.opt["autoencoder"]["embed_dim"]
-        else:
-            noise_chn = self.gt.shape[1]
+        # Generate Gaussian noise with spatial dimensions matching ground truth
         noise = torch.randn(
-            size=(batch_size, noise_chn,) + (latent_resolution,) * 2,
-            device=self.device,
+            self.gt.shape,
+            device=self.device
         )
 
         if self.opt["network_g"]["cond_lq"]:
@@ -141,7 +152,7 @@ class ResShiftModel(SRRSModel):
         loss_computer = functools.partial(
             self.base_diffusion.training_losses,
             self.net_g,
-            self.gt,
+            self.reg_input,
             self.lq,
             tt,
             first_stage_model=self.autoencoder_attr_accessor,
@@ -193,9 +204,9 @@ class ResShiftModel(SRRSModel):
             for sample in self.base_diffusion.p_sample_loop_progressive(
                     y=lq,
                     model=model,
-                    first_stage_model=self.autoencoder_attr_accessor,
+                    first_stage_model=None,
                     noise=None,
-                    clip_denoised=True if self.autoencoder_attr_accessor is None else False,
+                    clip_denoised=True,
                     model_kwargs={'lq': lq},
                     device=self.device,
                     progress=False,
@@ -233,103 +244,3 @@ class ResShiftModel(SRRSModel):
         out_dict = super().get_current_visuals()
         out_dict["sr_all"] = self.sr_all.detach().cpu()
         return out_dict
-
-    def nondist_validation(self, dataloader, current_iter, tb_logger, save_img):
-        dataset_name = dataloader.dataset.opt['name']
-        with_metrics = self.opt['val'].get('metrics') is not None
-        use_pbar = self.opt['val'].get('pbar', False)
-
-        if with_metrics:
-            if not hasattr(self, 'metric_results'):  # only execute in the first run
-                self.metric_results = {metric: 0 for metric in self.opt['val']['metrics'].keys()}
-            # initialize the best metric results for each dataset_name (supporting multiple validation datasets)
-            self._initialize_best_metric_results(dataset_name)
-            # zero self.metric_results
-            self.metric_results = {metric: 0 for metric in self.metric_results}
-
-        metric_data = dict()
-        detailed_metrics = pd.DataFrame()
-
-        if use_pbar:
-            pbar = tqdm(total=len(dataloader), unit='image')
-
-        for idx, val_data in enumerate(dataloader):
-
-            # compute
-            self.feed_data(val_data)
-            self.test()
-
-            # sr_image or gt_image HWC. Channel Order: RGB NIR. Value: 0-255
-            visuals = self.get_current_visuals()            # cpu tensor B(RGBNIR)HW float32
-            lq_img = minusone_one_tensor_to_ubyte_numpy(visuals['lq'])      # numpy H(BW)(RGBNIR) uint8
-            sr_all = minusone_one_tensor_to_ubyte_numpy(visuals['sr_all'])  # numpy H(BW)(RGBNIR) uint8
-            sr_img = minusone_one_tensor_to_ubyte_numpy(visuals['result'])  # numpy H(BW)(RGBNIR) uint8
-            metric_data['img'] = sr_img
-            if 'gt' in visuals:
-                gt_img = minusone_one_tensor_to_ubyte_numpy(visuals['gt'])
-                metric_data['img2'] = gt_img
-                del self.gt
-            else:
-                gt_img = None
-
-            # tentative for out of GPU memory
-            del self.lq
-            del self.output
-            torch.cuda.empty_cache()
-
-            # start log
-            lq_path = val_data['lq_path'][0]
-            if lq_path.endswith('.taco'):
-                img_name = osp.basename(lq_path.split(',')[0])
-            else:
-                img_name = osp.splitext(lq_path)[0]
-
-            band_idx = val_data['band_idx'][0]
-
-            if with_metrics:
-                # calculate metrics
-                for name, opt_ in self.opt['val']['metrics'].items():
-                    result = calculate_metric(metric_data, opt_)
-                    detailed_metrics.loc[img_name, name] = result
-                    self.metric_results[name] += result
-
-            if save_img:
-                visual_fodler = self.opt['path']['visualization']
-
-                rgb_path = osp.join(visual_fodler, "RGB", dataset_name, img_name)
-                rgb_dict = {
-                    "lq": lq_img[..., :3],
-                    "gt": gt_img[..., :3] if gt_img is not None else None,
-                    f"sr_{current_iter}": sr_img[..., :3],
-                    f"all_{current_iter}": sr_all[..., :3],
-                }
-                self.rswrite(rgb_path, rgb_dict, is_rgb_order=True)
-
-                if len(band_idx) == 4:
-                    nir_path = osp.join(visual_fodler, "NIR", dataset_name, img_name)
-                    nir_dict = {
-                        "lq": lq_img[..., [3]],
-                        "gt": gt_img[..., [3]] if gt_img is not None else None,
-                        f"sr_{current_iter}": sr_img[..., [3]],
-                        f"all_{current_iter}": sr_all[..., [3]],
-                    }
-                    self.rswrite(nir_path, nir_dict, is_rgb_order=False)
-
-                if with_metrics:
-                    save_csv_file = osp.join(visual_fodler, f"{dataset_name}_{current_iter}.csv")
-                    detailed_metrics.to_csv(save_csv_file)
-
-            if use_pbar:
-                pbar.update(1)
-                pbar.set_description(f'Test {img_name}')
-
-        if use_pbar:
-            pbar.close()
-
-        if with_metrics:
-            for metric in self.metric_results.keys():
-                self.metric_results[metric] /= (idx + 1)
-                # update the best metric result
-                self._update_best_metric_result(dataset_name, metric, self.metric_results[metric], current_iter)
-
-            self._log_validation_metric_values(current_iter, dataset_name, tb_logger)
